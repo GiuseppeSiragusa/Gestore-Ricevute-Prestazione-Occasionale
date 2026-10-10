@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestore Ricevute Prestazione Occasionale con Ritenuta</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- html2pdf.js per l'esportazione in PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- Inter Font -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            100: '#dbeafe',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            800: '#1e40af',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @media print {
+            body * {
+                visibility: hidden;
+            }
+            #pdf-preview, #pdf-preview * {
+                visibility: visible;
+            }
+            #pdf-preview {
+                position: absolute;
+                left: 0;
+                top: 0;
+                width: 100%;
+                box-shadow: none !important;
+                border: none !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="h-full text-slate-800 antialiased font-sans">
+
+    <div class="min-h-full flex flex-col">
+        <!-- Navigation / Header -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 no-print">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="flex justify-between h-16 items-center">
+                    <div class="flex items-center space-x-3">
+                        <div class="p-2 bg-brand-600 text-white rounded-xl shadow-md">
+                            <i data-lucide="file-spreadsheet" class="w-6 h-6"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-lg text-slate-900 leading-tight">Fatture & Ricevute Occasionali</h1>
+                            <p class="text-xs text-slate-500">Calcolo IRPEF 35% e Ritenuta d'Acconto 20%</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button onclick="saveCurrentReceipt()" class="inline-flex items-center px-3 py-2 border border-slate-300 shadow-sm text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors">
+                            <i data-lucide="save" class="w-4 h-4 mr-1.5 text-slate-500"></i>
+                            Salva Documento
+                        </button>
+                        <button onclick="openSavedModal()" class="inline-flex items-center px-3 py-2 border border-slate-300 shadow-sm text-sm font-medium rounded-lg text-slate-700 bg-white hover:bg-slate-50 transition-colors">
+                            <i data-lucide="folder-open" class="w-4 h-4 mr-1.5 text-slate-500"></i>
+                            Archivio (<span id="saved-count">0</span>)
+                        </button>
+                        <button onclick="downloadPDF()" class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-lg text-white bg-brand-600 hover:bg-brand-700 transition-colors">
+                            <i data-lucide="download" class="w-4 h-4 mr-1.5"></i>
+                            Scarica PDF
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+
+                <!-- LEFT COLUMN: Form controls and calculator -->
+                <div class="lg:col-span-6 space-y-6 no-print">
+
+                    <!-- Calculator Settings Box -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="bg-slate-50/80 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
+                            <div class="flex items-center space-x-2">
+                                <i data-lucide="calculator" class="w-5 h-5 text-brand-600"></i>
+                                <h2 class="font-semibold text-slate-900">Parametri di Calcolo Avanzato</h2>
+                            </div>
+                            <span class="text-xs bg-brand-50 text-brand-700 font-medium px-2.5 py-1 rounded-full border border-brand-100">
+                                Prezzo Reale vs Lordo
+                            </span>
+                        </div>
+                        <div class="p-5 space-y-4">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                                        Aliquota IRPEF Utente
+                                    </label>
+                                    <div class="relative rounded-md shadow-sm">
+                                        <input type="number" id="irpefRate" value="35" min="0" max="100" step="0.5" oninput="calculateTotals()" class="block w-full rounded-lg border-slate-300 pr-8 focus:border-brand-500 focus:ring-brand-500 text-sm py-2 px-3 border">
+                                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                            <span class="text-slate-500 text-sm">%</span>
+                                        </div>
+                                    </div>
+                                    <p class="text-[11px] text-slate-500 mt-1">Sostituzione/ricarico IRPEF di riferimento</p>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-1">
+                                        Ritenuta d'Acconto
+                                    </label>
+                                    <div class="relative rounded-md shadow-sm">
+                                        <input type="number" id="withholdingRate" value="20" readonly class="block w-full rounded-lg border-slate-200 bg-slate-50 pr-8 text-slate-500 text-sm py-2 px-3 border cursor-not-allowed">
+                                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                            <span class="text-slate-400 text-sm">%</span>
+                                        </div>
+                                    </div>
+                                    <p class="text-[11px] text-slate-500 mt-1">Ritenuta fiscale obbligatoria di legge</p>
+                                </div>
+                            </div>
+
+                            <!-- Calculation Mode Radio Buttons -->
+                            <div class="pt-2">
+                                <label class="block text-xs font-semibold text-slate-600 uppercase tracking-wider mb-2">Modalità di Determinazione Prezzo</label>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <label class="relative flex p-3 rounded-lg border border-slate-200 bg-white cursor-pointer focus:outline-none hover:border-brand-300 transition-all shadow-sm">
+                                        <input type="radio" name="calcMode" value="targetNet" checked onchange="calculateTotals()" class="h-4 w-4 text-brand-600 border-slate-300 focus:ring-brand-500 mt-0.5">
+                                        <span class="ml-3 flex flex-col">
+                                            <span class="block text-sm font-medium text-slate-900">Da Incasso Reale Desiderato</span>
+                                            <span class="block text-xs text-slate-500">Aggiunge il +35% IRPEF per garantire il netto in tasca.</span>
+                                        </span>
+                                    </label>
+                                    <label class="relative flex p-3 rounded-lg border border-slate-200 bg-white cursor-pointer focus:outline-none hover:border-brand-300 transition-all shadow-sm">
+                                        <input type="radio" name="calcMode" value="directGross" onchange="calculateTotals()" class="h-4 w-4 text-brand-600 border-slate-300 focus:ring-brand-500 mt-0.5">
+                                        <span class="ml-3 flex flex-col">
+                                            <span class="block text-sm font-medium text-slate-900">Prezzo Lordo Diretto</span>
+                                            <span class="block text-xs text-slate-500">Inserimento importo lordo base senza ricarico IRPEF extra.</span>
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Stamp Duty Options -->
+                            <div class="pt-2 border-t border-slate-100 flex items-center justify-between">
+                                <div>
+                                    <span class="text-xs font-semibold text-slate-700 block">Marca da Bollo (€ 2,00)</span>
+                                    <span class="text-[11px] text-slate-500 block">Obbligatoria per compensi superiori a € 77,47</span>
+                                </div>
+                                <div class="flex items-center space-x-3">
+                                    <select id="stampDutyCharge" onchange="calculateTotals()" class="rounded-lg border-slate-300 text-xs py-1.5 px-2 border focus:border-brand-500 focus:ring-brand-500">
+                                        <option value="client">Addebita al Committente</option>
+                                        <option value="worker">A carico mio (Privato)</option>
+                                        <option value="none">Escludi Bollo</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Items / Services Form -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="bg-slate-50/80 px-5 py-4 border-b border-slate-200 flex justify-between items-center">
+                            <div class="flex items-center space-x-2">
+                                <i data-lucide="list-plus" class="w-5 h-5 text-brand-600"></i>
+                                <h2 class="font-semibold text-slate-900">Voci e Prestazioni Svolte</h2>
+                            </div>
+                            <button onclick="addItemRow()" class="text-xs inline-flex items-center bg-brand-50 text-brand-700 hover:bg-brand-100 px-3 py-1.5 rounded-lg font-medium border border-brand-200 transition-colors">
+                                <i data-lucide="plus" class="w-3.5 h-3.5 mr-1"></i> Aggiungi Voce
+                            </button>
+                        </div>
+                        <div class="p-4">
+                            <div id="itemsContainer" class="space-y-3">
+                                <!-- Dynamic rows injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Parties Info (Sender / Receiver) -->
+                    <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="border-b border-slate-200 bg-slate-50/80 px-5 py-3">
+                            <nav class="-mb-px flex space-x-6" aria-label="Tabs">
+                                <button onclick="switchTab('sender')" id="tab-sender" class="border-brand-500 text-brand-600 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center">
+                                    <i data-lucide="user" class="w-4 h-4 mr-2"></i> Dati Mittente (Privato)
+                                </button>
+                                <button onclick="switchTab('client')" id="tab-client" class="border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center">
+                                    <i data-lucide="building-2" class="w-4 h-4 mr-2"></i> Dati Committente (Azienda)
+                                </button>
+                                <button onclick="switchTab('details')" id="tab-details" class="border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300 whitespace-nowrap py-2 px-1 border-b-2 font-medium text-sm flex items-center">
+                                    <i data-lucide="file-text" class="w-4 h-4 mr-2"></i> Info Documento
+                                </button>
+                            </nav>
+                        </div>
+
+                        <div class="p-5">
+                            <!-- Sender Tab -->
+                            <div id="content-sender" class="space-y-4">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Nome e Cognome *</label>
+                                        <input type="text" id="senderName" value="Mario Rossi" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Codice Fiscale *</label>
+                                        <input type="text" id="senderTaxId" value="RSSMRA85M01H501Z" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 uppercase focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Indirizzo di Residenza</label>
+                                        <input type="text" id="senderAddress" value="Via Roma 100, 00100 Roma (RM)" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Email / PEC</label>
+                                        <input type="email" id="senderEmail" value="mario.rossi@email.it" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">IBAN per il Pagamento</label>
+                                        <input type="text" id="senderIban" value="IT60X0542811101000000123456" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 uppercase focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Client Tab -->
+                            <div id="content-client" class="space-y-4 hidden">
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                    <div class="sm:col-span-2">
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Ragione Sociale / Nome Azienda *</label>
+                                        <input type="text" id="clientName" value="Azienda Committente S.r.l." oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Partita IVA / Cod. Fiscale *</label>
+                                        <input type="text" id="clientVat" value="12345678901" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Città e Cap</label>
+                                        <input type="text" id="clientCity" value="Milano (MI)" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div class="sm:col-span-2">
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Indirizzo Sede Legale</label>
+                                        <input type="text" id="clientAddress" value="Via Monte Napoleone 12, 20121 Milano" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Details Tab -->
+                            <div id="content-details" class="space-y-4 hidden">
+                                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Numero Documento</label>
+                                        <input type="text" id="docNumber" value="01/2026" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Data Emissione</label>
+                                        <input type="date" id="docDate" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                    <div>
+                                        <label class="block text-xs font-medium text-slate-700 mb-1">Modalità Pagamento</label>
+                                        <input type="text" id="paymentMethod" value="Bonifico Bancario" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-slate-700 mb-1">Oggetto / Note generali della Prestazione</label>
+                                    <textarea id="docSubject" rows="2" oninput="updatePreview()" class="w-full text-sm rounded-lg border-slate-300 border py-2 px-3 focus:ring-brand-500 focus:border-brand-500" placeholder="Es. Prestazione d'opera occasionale per consulenza informatica e sviluppo web..."></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary Card for Quick Reading -->
+                    <div class="bg-gradient-to-br from-slate-900 to-slate-800 text-white p-5 rounded-xl shadow-lg space-y-3">
+                        <div class="flex justify-between items-center text-slate-300 text-xs border-b border-slate-700 pb-2">
+                            <span>Riepilogo Dinamico Calcoli</span>
+                            <span class="font-mono" id="summary-mode-badge">Modalità Reale + 35%</span>
+                        </div>
+                        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-1">
+                            <div class="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                                <span class="text-[10px] uppercase text-slate-400 block">Prezzo Netto Desiderato</span>
+                                <span class="text-base font-bold text-emerald-400" id="summary-net-target">€ 0,00</span>
+                            </div>
+                            <div class="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                                <span class="text-[10px] uppercase text-slate-400 block">Lordo Fiscale Doc.</span>
+                                <span class="text-base font-bold text-white" id="summary-gross">€ 0,00</span>
+                            </div>
+                            <div class="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                                <span class="text-[10px] uppercase text-slate-400 block">Ritenuta 20%</span>
+                                <span class="text-base font-bold text-amber-400" id="summary-withholding">-€ 0,00</span>
+                            </div>
+                            <div class="bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
+                                <span class="text-[10px] uppercase text-slate-400 block">Netto a Saldo</span>
+                                <span class="text-base font-bold text-brand-300" id="summary-net-payable">€ 0,00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- RIGHT COLUMN: Document Live Preview -->
+                <div class="lg:col-span-6">
+                    <div class="sticky top-20">
+                        <div class="flex items-center justify-between mb-3 no-print">
+                            <h2 class="text-sm font-semibold text-slate-700 flex items-center">
+                                <i data-lucide="eye" class="w-4 h-4 mr-1.5 text-brand-600"></i> Anteprima Documento Fiscale Live
+                            </h2>
+                            <div class="flex space-x-2">
+                                <button onclick="window.print()" class="text-xs inline-flex items-center bg-white border border-slate-300 px-3 py-1.5 rounded-lg font-medium text-slate-700 hover:bg-slate-50">
+                                    <i data-lucide="printer" class="w-3.5 h-3.5 mr-1"></i> Stampa
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- A4 Document Paper Container -->
+                        <div id="pdf-preview" class="bg-white rounded-lg shadow-xl border border-slate-200 p-8 text-slate-800 text-sm font-sans mx-auto min-h-[750px] flex flex-col justify-between">
+                            <div>
+                                <!-- Document Header -->
+                                <div class="flex justify-between items-start border-b border-slate-200 pb-6 mb-6">
+                                    <div>
+                                        <h2 class="text-xl font-bold text-slate-900 tracking-tight" id="prev-sender-name">Mario Rossi</h2>
+                                        <p class="text-xs text-slate-600 mt-1" id="prev-sender-address">Via Roma 100, 00100 Roma (RM)</p>
+                                        <p class="text-xs text-slate-600" id="prev-sender-tax">C.F.: RSSMRA85M01H501Z</p>
+                                        <p class="text-xs text-slate-600" id="prev-sender-email">mario.rossi@email.it</p>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="inline-block px-3 py-1 bg-slate-100 text-slate-800 rounded font-bold text-xs uppercase tracking-wider mb-2">
+                                            RICEVUTA PER PRESTAZIONE OCCASIONALE
+                                        </span>
+                                        <p class="text-xs text-slate-600">N. Documento: <strong id="prev-doc-num" class="text-slate-900">01/2026</strong></p>
+                                        <p class="text-xs text-slate-600">Data: <strong id="prev-doc-date" class="text-slate-900">--/--/----</strong></p>
+                                    </div>
+                                </div>
+
+                                <!-- Recipient Box -->
+                                <div class="bg-slate-50 rounded-lg p-4 mb-6 border border-slate-100 flex justify-between">
+                                    <div>
+                                        <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Spett.le Committente / Azienda:</span>
+                                        <p class="font-bold text-slate-900 text-base" id="prev-client-name">Azienda Committente S.r.l.</p>
+                                        <p class="text-xs text-slate-600" id="prev-client-address">Via Monte Napoleone 12, 20121 Milano</p>
+                                        <p class="text-xs text-slate-600" id="prev-client-city">Milano (MI)</p>
+                                        <p class="text-xs text-slate-600" id="prev-client-vat">P.IVA / C.F.: 12345678901</p>
+                                    </div>
+                                </div>
+
+                                <!-- Subject Line -->
+                                <div class="mb-6" id="prev-subject-container">
+                                    <span class="text-[10px] uppercase font-bold text-slate-400 block mb-1">Oggetto della Prestazione:</span>
+                                    <p class="text-xs text-slate-700 italic bg-white p-2 border-l-2 border-brand-500" id="prev-subject">
+                                        Prestazione d'opera occasionale senza vincolo di subordinazione.
+                                    </p>
+                                </div>
+
+                                <!-- Items Table -->
+                                <table class="w-full text-left mb-6 border-collapse">
+                                    <thead>
+                                        <tr class="border-b border-slate-300 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+                                            <th class="py-2">Descrizione Prestazione</th>
+                                            <th class="py-2 text-center w-16">Q.tà</th>
+                                            <th class="py-2 text-right w-24">Unitario</th>
+                                            <th class="py-2 text-right w-24">Totale</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="prev-items-body" class="divide-y divide-slate-100 text-xs text-slate-700">
+                                        <!-- Dynamic items list -->
+                                    </tbody>
+                                </table>
+
+                                <!-- Totals Calculation Breakdown -->
+                                <div class="flex justify-end mb-6">
+                                    <div class="w-full sm:w-72 space-y-2 text-xs">
+                                        <div class="flex justify-between text-slate-600">
+                                            <span>Totale Compenso Lordo:</span>
+                                            <span class="font-semibold text-slate-800" id="prev-total-gross">€ 0,00</span>
+                                        </div>
+                                        <div class="flex justify-between text-slate-600">
+                                            <span>Ritenuta d'Acconto (20%):</span>
+                                            <span class="font-semibold text-amber-600" id="prev-total-withholding">-€ 0,00</span>
+                                        </div>
+                                        <div id="prev-stamp-row" class="flex justify-between text-slate-600 hidden">
+                                            <span>Marca da Bollo:</span>
+                                            <span class="font-semibold text-slate-800" id="prev-total-stamp">+€ 2,00</span>
+                                        </div>
+                                        <div class="border-t border-slate-300 pt-2 flex justify-between text-sm font-bold text-slate-900 bg-slate-50 p-2 rounded">
+                                            <span>Netto a Pagarne:</span>
+                                            <span class="text-brand-700" id="prev-total-net">€ 0,00</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Payment Details Box -->
+                                <div class="bg-slate-50 rounded-lg p-3 text-xs text-slate-600 border border-slate-200/60 mb-6">
+                                    <p class="font-semibold text-slate-800 mb-1">Dettagli Pagamento:</p>
+                                    <p>Modalità: <span id="prev-pay-method">Bonifico Bancario</span></p>
+                                    <p>IBAN: <span id="prev-pay-iban" class="font-mono font-medium text-slate-900">IT60X0542811101000000123456</span></p>
+                                </div>
+
+                                <!-- Legal Declarations -->
+                                <div class="text-[10px] text-slate-500 space-y-1.5 border-t border-slate-200 pt-4 leading-relaxed">
+                                    <p>• Prestazione svolta ai sensi dell'art. 2222 e segg. del Codice Civile. Operazione fuori campo applicazione IVA ai sensi dell'art. 5 del D.P.R. 633/1972 e successive modifiche.</p>
+                                    <p>• Compenso non soggetto a ritenuta previdenziale INPS in quanto contenuto nel limite annuale di € 5.000,00 (art. 44 D.L. 269/2003 convertito in Legge 326/2003).</p>
+                                    <p id="prev-stamp-note">• Marca da bollo da € 2,00 applicata sull'originale per importi superiori a € 77,47 IDN/ID: __________________</p>
+                                </div>
+                            </div>
+
+                            <!-- Document Footer Signatures -->
+                            <div class="pt-8 border-t border-slate-100 flex justify-between items-end text-xs text-slate-500">
+                                <div>
+                                    <p>Luogo e Data: __________________</p>
+                                </div>
+                                <div class="text-center">
+                                    <p class="mb-8">Firma del Dichiarante</p>
+                                    <p class="border-t border-slate-400 pt-1 px-8 font-medium text-slate-700" id="prev-signature-name">Mario Rossi</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <!-- Saved Documents Modal -->
+    <div id="savedModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="px-6 py-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+                <h3 class="font-bold text-slate-900 text-base flex items-center">
+                    <i data-lucide="folder" class="w-5 h-5 mr-2 text-brand-600"></i> Archiviate in Locale
+                </h3>
+                <button onclick="closeSavedModal()" class="text-slate-400 hover:text-slate-600">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto flex-1 custom-scrollbar">
+                <div id="savedListContainer" class="space-y-3">
+                    <!-- Dynamic saved list -->
+                </div>
+            </div>
+            <div class="px-6 py-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+                <button onclick="closeSavedModal()" class="px-4 py-2 bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-300">
+                    Chiudi
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Default State
+        let items = [
+            { id: 1, description: 'Sviluppo Sito Web e Grafica', qty: 1, price: 500 }
+        ];
+
+        // Initialization
+        window.onload = function() {
+            lucide.createIcons();
+            
+            // Set current date as default
+            const today = new Date().toISOString().split('T')[0];
+            document.getElementById('docDate').value = today;
+
+            renderItemsForm();
+            calculateTotals();
+            updateSavedCount();
+        };
+
+        // Tab Switching Logic
+        function switchTab(tab) {
+            ['sender', 'client', 'details'].forEach(t => {
+                const tabBtn = document.getElementById(`tab-${t}`);
+                const tabContent = document.getElementById(`content-${t}`);
+                if (t === tab) {
+                    tabBtn.classList.add('border-brand-500', 'text-brand-600');
+                    tabBtn.classList.remove('border-transparent', 'text-slate-500');
+                    tabContent.classList.remove('hidden');
+                } else {
+                    tabBtn.classList.remove('border-brand-500', 'text-brand-600');
+                    tabBtn.classList.add('border-transparent', 'text-slate-500');
+                    tabContent.classList.add('hidden');
+                }
+            });
+        }
+
+        // Render dynamic input rows for item items
+        function renderItemsForm() {
+            const container = document.getElementById('itemsContainer');
+            container.innerHTML = '';
+
+            items.forEach((item, index) => {
+                const row = document.createElement('div');
+                row.className = "flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200";
+                row.innerHTML = `
+                    <div class="flex-1">
+                        <input type="text" value="${item.description}" oninput="updateItem(${item.id}, 'description', this.value)" placeholder="Descrizione lavoro/servizio" class="w-full text-xs rounded border-slate-300 border py-1.5 px-2 focus:ring-brand-500">
+                    </div>
+                    <div class="w-16">
+                        <input type="number" value="${item.qty}" min="1" step="0.5" oninput="updateItem(${item.id}, 'qty', this.value)" class="w-full text-xs rounded border-slate-300 border py-1.5 px-2 text-center focus:ring-brand-500">
+                    </div>
+                    <div class="w-28">
+                        <input type="number" value="${item.price}" min="0" step="10" oninput="updateItem(${item.id}, 'price', this.value)" class="w-full text-xs rounded border-slate-300 border py-1.5 px-2 text-right focus:ring-brand-500">
+                    </div>
+                    <button onclick="removeItemRow(${item.id})" class="text-slate-400 hover:text-red-500 p-1">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                `;
+                container.appendChild(row);
+            });
+            lucide.createIcons();
+        }
+
+        function addItemRow() {
+            const newId = Date.now();
+            items.push({ id: newId, description: '', qty: 1, price: 100 });
+            renderItemsForm();
+            calculateTotals();
+        }
+
+        function removeItemRow(id) {
+            if (items.length <= 1) return;
+            items = items.filter(i => i.id !== id);
+            renderItemsForm();
+            calculateTotals();
+        }
+
+        function updateItem(id, key, value) {
+            const item = items.find(i => i.id === id);
+            if (item) {
+                if (key === 'qty' || key === 'price') {
+                    item[key] = parseFloat(value) || 0;
+                } else {
+                    item[key] = value;
+                }
+            }
+            calculateTotals();
+        }
+
+        function calculateTotals() {
+            const irpefRate = (parseFloat(document.getElementById('irpefRate').value) || 0) / 100;
+            const withholdingRate = 0.20; // Fixed 20%
+            const calcMode = document.querySelector('input[name="calcMode"]:checked').value;
+            const stampDutyCharge = document.getElementById('stampDutyCharge').value;
+
+            let sumDesiredNet = 0;
+
+            items.forEach(item => {
+                sumDesiredNet += (item.qty * item.price);
+            });
+
+            let grossTotal = 0;
+
+            if (calcMode === 'targetNet') {
+                // If Target Net mode:
+                // Gross is calculated taking into account the user IRPEF tax rate desired (+35%)
+                // Formula: Gross = NetDesired * (1 + IrpefRate)
+                grossTotal = sumDesiredNet * (1 + irpefRate);
+            } else {
+                // Direct Gross mode: the item inputs represent the actual gross amount
+                grossTotal = sumDesiredNet;
+            }
+
+            // Calculation of Withholding tax (20% on Fiscal Gross)
+            const withholdingAmount = grossTotal * withholdingRate;
+
+            // Stamp Duty Logic (€ 2.00 if gross > 77.47)
+            let stampDuty = 0;
+            if (grossTotal > 77.47 && stampDutyCharge !== 'none') {
+                stampDuty = 2.00;
+            }
+
+            // Net payable by client
+            let netPayable = grossTotal - withholdingAmount;
+            if (stampDutyCharge === 'client') {
+                netPayable += stampDuty;
+            }
+
+            // Real pocket money for worker
+            let realNetInPocket = calcMode === 'targetNet' ? sumDesiredNet : (grossTotal - withholdingAmount);
+
+            // Update UI Summary Elements
+            document.getElementById('summary-net-target').textContent = formatCurrency(sumDesiredNet);
+            document.getElementById('summary-gross').textContent = formatCurrency(grossTotal);
+            document.getElementById('summary-withholding').textContent = '-' + formatCurrency(withholdingAmount);
+            document.getElementById('summary-net-payable').textContent = formatCurrency(netPayable);
+
+            document.getElementById('summary-mode-badge').textContent = calcMode === 'targetNet' ? `Reale + ${(irpefRate*100).toFixed(0)}% IRPEF` : 'Lordo Diretto';
+
+            // Update Live Document Preview
+            updatePreviewValues({
+                grossTotal,
+                withholdingAmount,
+                stampDuty,
+                stampDutyCharge,
+                netPayable
+            });
+        }
+
+        function updatePreviewValues(calcResult) {
+            // Text inputs bindings
+            document.getElementById('prev-sender-name').textContent = document.getElementById('senderName').value || 'Nome Cognome';
+            document.getElementById('prev-signature-name').textContent = document.getElementById('senderName').value || 'Nome Cognome';
+            document.getElementById('prev-sender-address').textContent = document.getElementById('senderAddress').value || '-';
+            document.getElementById('prev-sender-tax').textContent = 'C.F.: ' + (document.getElementById('senderTaxId').value || '-');
+            document.getElementById('prev-sender-email').textContent = document.getElementById('senderEmail').value || '-';
+
+            document.getElementById('prev-client-name').textContent = document.getElementById('clientName').value || 'Ragione Sociale';
+            document.getElementById('prev-client-address').textContent = document.getElementById('clientAddress').value || '-';
+            document.getElementById('prev-client-city').textContent = document.getElementById('clientCity').value || '-';
+            document.getElementById('prev-client-vat').textContent = 'P.IVA / C.F.: ' + (document.getElementById('clientVat').value || '-');
+
+            document.getElementById('prev-doc-num').textContent = document.getElementById('docNumber').value || '01/2026';
+            
+            const rawDate = document.getElementById('docDate').value;
+            if (rawDate) {
+                const parts = rawDate.split('-');
+                document.getElementById('prev-doc-date').textContent = `${parts[2]}/${parts[1]}/${parts[0]}`;
+            }
+
+            document.getElementById('prev-subject').textContent = document.getElementById('docSubject').value || "Prestazione d'opera occasionale senza vincolo di subordinazione.";
+            document.getElementById('prev-pay-method').textContent = document.getElementById('paymentMethod').value || 'Bonifico';
+            document.getElementById('prev-pay-iban').textContent = document.getElementById('senderIban').value || '-';
+
+            // Update items table in document
+            const tbody = document.getElementById('prev-items-body');
+            tbody.innerHTML = '';
+
+            const calcMode = document.querySelector('input[name="calcMode"]:checked').value;
+            const irpefRate = (parseFloat(document.getElementById('irpefRate').value) || 0) / 100;
+
+            items.forEach(item => {
+                const tr = document.createElement('tr');
+                tr.className = "border-b border-slate-100";
+                
+                // Calculate unit gross for display in document
+                let itemUnitGross = calcMode === 'targetNet' ? (item.price * (1 + irpefRate)) : item.price;
+                let itemTotalGross = itemUnitGross * item.qty;
+
+                tr.innerHTML = `
+                    <td class="py-2 text-slate-800 font-medium">${item.description || 'Prestazione d\'opera'}</td>
+                    <td class="py-2 text-center text-slate-600">${item.qty}</td>
+                    <td class="py-2 text-right text-slate-600">${formatCurrency(itemUnitGross)}</td>
+                    <td class="py-2 text-right font-semibold text-slate-800">${formatCurrency(itemTotalGross)}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Update Totals on document
+            document.getElementById('prev-total-gross').textContent = formatCurrency(calcResult.grossTotal);
+            document.getElementById('prev-total-withholding').textContent = '-' + formatCurrency(calcResult.withholdingAmount);
+
+            // Stamp row visibility
+            const stampRow = document.getElementById('prev-stamp-row');
+            const stampNote = document.getElementById('prev-stamp-note');
+
+            if (calcResult.stampDuty > 0 && calcResult.stampDutyCharge === 'client') {
+                stampRow.classList.remove('hidden');
+                document.getElementById('prev-total-stamp').textContent = '+€ 2,00';
+            } else {
+                stampRow.classList.add('hidden');
+            }
+
+            if (calcResult.grossTotal > 77.47) {
+                stampNote.classList.remove('hidden');
+            } else {
+                stampNote.classList.add('hidden');
+            }
+
+            document.getElementById('prev-total-net').textContent = formatCurrency(calcResult.netPayable);
+        }
+
+        function updatePreview() {
+            calculateTotals();
+        }
+
+        function formatCurrency(val) {
+            return new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(val || 0);
+        }
+
+        function downloadPDF() {
+            const element = document.getElementById('pdf-preview');
+            const docNum = document.getElementById('docNumber').value || '01';
+            const clientName = (document.getElementById('clientName').value || 'ricevuta').replace(/[^a-zA-Z0-9]/g, '_');
+
+            const opt = {
+                margin:       10,
+                filename:     `Ricevuta_${docNum}_${clientName}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+            };
+
+            html2pdf().set(opt).from(element).save();
+        }
+
+        function saveCurrentReceipt() {
+            const data = {
+                id: Date.now(),
+                dateSaved: new Date().toLocaleDateString('it-IT'),
+                docNum: document.getElementById('docNumber').value,
+                clientName: document.getElementById('clientName').value,
+                docDate: document.getElementById('docDate').value,
+                sender: {
+                    name: document.getElementById('senderName').value,
+                    taxId: document.getElementById('senderTaxId').value,
+                    address: document.getElementById('senderAddress').value,
+                    email: document.getElementById('senderEmail').value,
+                    iban: document.getElementById('senderIban').value
+                },
+                client: {
+                    name: document.getElementById('clientName').value,
+                    vat: document.getElementById('clientVat').value,
+                    city: document.getElementById('clientCity').value,
+                    address: document.getElementById('clientAddress').value
+                },
+                details: {
+                    subject: document.getElementById('docSubject').value,
+                    paymentMethod: document.getElementById('paymentMethod').value
+                },
+                items: items,
+                calcMode: document.querySelector('input[name="calcMode"]:checked').value,
+                irpefRate: document.getElementById('irpefRate').value,
+                stampDutyCharge: document.getElementById('stampDutyCharge').value
+            };
+
+            let saved = JSON.parse(localStorage.getItem('receipts_archive') || '[]');
+            saved.push(data);
+            localStorage.setItem('receipts_archive', JSON.stringify(saved));
+
+            updateSavedCount();
+            alert('Documento salvato con successo nell\'archivio locale!');
+        }
+
+        function updateSavedCount() {
+            let saved = JSON.parse(localStorage.getItem('receipts_archive') || '[]');
+            document.getElementById('saved-count').textContent = saved.length;
+        }
+
+        function openSavedModal() {
+            const modal = document.getElementById('savedModal');
+            const container = document.getElementById('savedListContainer');
+            let saved = JSON.parse(localStorage.getItem('receipts_archive') || '[]');
+
+            container.innerHTML = '';
+
+            if (saved.length === 0) {
+                container.innerHTML = `<p class="text-xs text-slate-500 text-center py-6">Nessun documento salvato in archivio.</p>`;
+            } else {
+                saved.forEach(doc => {
+                    const item = document.createElement('div');
+                    item.className = "flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors";
+                    item.innerHTML = `
+                        <div>
+                            <p class="text-xs font-bold text-slate-800">Doc. ${doc.docNum || 'Senza N.'} - ${doc.clientName || 'Cliente'}</p>
+                            <p class="text-[11px] text-slate-500">Salvato il: ${doc.dateSaved}</p>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="loadDocument(${doc.id})" class="px-2.5 py-1 text-xs bg-brand-600 text-white rounded font-medium hover:bg-brand-700">
+                                Carica
+                            </button>
+                            <button onclick="deleteDocument(${doc.id})" class="px-2.5 py-1 text-xs bg-red-100 text-red-600 rounded font-medium hover:bg-red-200">
+                                Elimina
+                            </button>
+                        </div>
+                    `;
+                    container.appendChild(item);
+                });
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeSavedModal() {
+            document.getElementById('savedModal').classList.add('hidden');
+        }
+
+        function loadDocument(id) {
+            let saved = JSON.parse(localStorage.getItem('receipts_archive') || '[]');
+            const doc = saved.find(d => d.id === id);
+            if (!doc) return;
+
+            document.getElementById('docNumber').value = doc.docNum || '';
+            document.getElementById('docDate').value = doc.docDate || '';
+
+            if (doc.sender) {
+                document.getElementById('senderName').value = doc.sender.name || '';
+                document.getElementById('senderTaxId').value = doc.sender.taxId || '';
+                document.getElementById('senderAddress').value = doc.sender.address || '';
+                document.getElementById('senderEmail').value = doc.sender.email || '';
+                document.getElementById('senderIban').value = doc.sender.iban || '';
+            }
+
+            if (doc.client) {
+                document.getElementById('clientName').value = doc.client.name || '';
+                document.getElementById('clientVat').value = doc.client.vat || '';
+                document.getElementById('clientCity').value = doc.client.city || '';
+                document.getElementById('clientAddress').value = doc.client.address || '';
+            }
+
+            if (doc.details) {
+                document.getElementById('docSubject').value = doc.details.subject || '';
+                document.getElementById('paymentMethod').value = doc.details.paymentMethod || '';
+            }
+
+            if (doc.items && doc.items.length) {
+                items = doc.items;
+            }
+
+            if (doc.irpefRate) {
+                document.getElementById('irpefRate').value = doc.irpefRate;
+            }
+
+            if (doc.stampDutyCharge) {
+                document.getElementById('stampDutyCharge').value = doc.stampDutyCharge;
+            }
+
+            if (doc.calcMode) {
+                const radio = document.querySelector(`input[name="calcMode"][value="${doc.calcMode}"]`);
+                if (radio) radio.checked = true;
+            }
+
+            renderItemsForm();
+            calculateTotals();
+            closeSavedModal();
+        }
+
+        function deleteDocument(id) {
+            let saved = JSON.parse(localStorage.getItem('receipts_archive') || '[]');
+            saved = saved.filter(d => d.id !== id);
+            localStorage.setItem('receipts_archive', JSON.stringify(saved));
+            updateSavedCount();
+            openSavedModal();
+        }
+    </script>
+</body>
+</html>
